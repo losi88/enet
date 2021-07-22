@@ -55,7 +55,9 @@ if(HAS_SOCKLEN_T)
     add_definitions(-DHAS_SOCKLEN_T=1)
 endif()
 
+add_definitions(-DENET_ENABLE_SSL)
 include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/external/openssl-1.1.1k/include)
 
 set(INCLUDE_FILES_PREFIX include/enet)
 set(INCLUDE_FILES
@@ -68,6 +70,9 @@ set(INCLUDE_FILES
     ${INCLUDE_FILES_PREFIX}/unix.h
     ${INCLUDE_FILES_PREFIX}/utility.h
     ${INCLUDE_FILES_PREFIX}/win32.h
+    ${INCLUDE_FILES_PREFIX}/ssl/common.h
+    ${INCLUDE_FILES_PREFIX}/ssl/ecdh.h
+	${INCLUDE_FILES_PREFIX}/ssl/ssl_enet.h
 )
 
 set(SOURCE_FILES
@@ -79,7 +84,10 @@ set(SOURCE_FILES
     peer.c
     protocol.c
     unix.c
-    win32.c)
+    win32.c
+	ssl/ecdh.cpp
+	ssl/ssl_enet.cpp
+	)
 
 source_group(include FILES ${INCLUDE_FILES})
 source_group(source FILES ${SOURCE_FILES})
