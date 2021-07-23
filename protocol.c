@@ -8,9 +8,6 @@
 #include "enet/utility.h"
 #include "enet/time.h"
 #include "enet/enet.h"
-#ifdef ENET_ENABLE_SSL
-#include "enet/ssl/ssl_enet.h"
-#endif
 
 static size_t commandSizes [ENET_PROTOCOL_COMMAND_COUNT] =
 {
@@ -342,34 +339,29 @@ enet_protocol_handle_connect (ENetHost * host, ENetProtocolHeader * header, ENet
     peer -> packetThrottleDeceleration = ENET_NET_TO_HOST_32 (command -> connect.packetThrottleDeceleration);
     peer -> eventData = ENET_NET_TO_HOST_32 (command -> connect.data);
 
-#ifdef ENET_ENABLE_SSL
-	// Need to find psk associated with header->sessionId
-	ownkey_s server_key;
-	if(!ssl_get_keymaterial_for_session_id((unsigned char*)command->connect.sslSessionID, &server_key))
+	if(host -> enableSSL)
 	{
-		return NULL;
+		// Need to find psk associated with header->sessionId
+		ownkey_s server_key;
+		if(!ssl_get_keymaterial_for_session_id((unsigned char*)command->connect.sslSessionID, &server_key))
+		{
+			return NULL;
+		}
+
+		peerkey_s client_key;
+		memcpy(client_key.ec_pub_key, command->connect.psk, CRYPTO_EC_PUB_KEY_LEN);
+		memcpy(client_key.salt, command->connect.salt, CRYPTO_SALT_LEN);
+
+		if (!ssl_key_calculate(&server_key, &client_key))
+		{
+			return NULL;
+		}
+
+		ssl_create_peer(peer, &server_key, &client_key);
+		
+		memcpy(verifyCommand.verifyConnect.psk, server_key.ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
+		memcpy(verifyCommand.verifyConnect.salt, server_key.salt, CRYPTO_SALT_LEN);
 	}
-
-	peerkey_s client_key;
-	memcpy(client_key.ec_pub_key, command->connect.psk, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(client_key.salt, command->connect.salt, CRYPTO_SALT_LEN);
-
-	if (!ssl_key_calculate(&server_key, &client_key))
-	{
-		return NULL;
-	}
-
-	peer->peerSSLIndex = ssl_create_peer(&server_key, &client_key);
-	if (peer->peerSSLIndex < 0)
-	{
-		return NULL;
-	}
-	
-	memcpy(verifyCommand.verifyConnect.psk, server_key.ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(verifyCommand.verifyConnect.salt, server_key.salt, CRYPTO_SALT_LEN);
-
-#endif
-
 
     incomingSessionID = command -> connect.incomingSessionID == 0xFF ? peer -> outgoingSessionID : command -> connect.incomingSessionID;
     incomingSessionID = (incomingSessionID + 1) & (ENET_PROTOCOL_HEADER_SESSION_MASK >> ENET_PROTOCOL_HEADER_SESSION_SHIFT);
@@ -1023,17 +1015,17 @@ enet_protocol_handle_verify_connect (ENetHost * host, ENetEvent * event, ENetPee
     peer -> incomingBandwidth = ENET_NET_TO_HOST_32 (command -> verifyConnect.incomingBandwidth);
     peer -> outgoingBandwidth = ENET_NET_TO_HOST_32 (command -> verifyConnect.outgoingBandwidth);
 
-#ifdef ENET_ENABLE_SSL
-
-	SSL_Peer* ssl_peer = get_peer(peer->peerSSLIndex);
-	memcpy(ssl_peer->peer_key.ec_pub_key, command->verifyConnect.psk, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(ssl_peer->peer_key.salt, command->verifyConnect.salt, CRYPTO_SALT_LEN);
-	
-	if (!ssl_key_calculate(&ssl_peer->ownkey, &ssl_peer->peer_key))
+	if(host -> enableSSL)
 	{
-		return NULL;
+		memcpy(peer->ssl_peer.peer_key.ec_pub_key, command->verifyConnect.psk, CRYPTO_EC_PUB_KEY_LEN);
+		memcpy(peer->ssl_peer.peer_key.salt, command->verifyConnect.salt, CRYPTO_SALT_LEN);
+		
+		if (!ssl_key_calculate(&peer->ssl_peer.ownkey, &peer->ssl_peer.peer_key))
+		{
+			return NULL;
+		}
 	}
-#endif
+
     enet_protocol_notify_connect (host, peer, event);
     return 0;
 }
@@ -1049,22 +1041,21 @@ enet_protocol_handle_incoming_commands (ENetHost * host, ENetEvent * event)
     enet_uint16 peerID, flags;
     enet_uint8 sessionID;
 
-#ifdef ENET_ENABLE_SSL
-	peer = enet_get_peer_by_address(host, &host->receivedAddress);
-	if (peer && (peer->state == ENET_PEER_STATE_CONNECTED || peer->state == ENET_PEER_STATE_ACKNOWLEDGING_CONNECT))
+	if(host -> enableSSL)
 	{
-		SSL_Peer* ssl_peer = get_peer(peer->peerSSLIndex);
-		int decryptedSize = ssl_decrypt_message(peer->peerSSLIndex, host->receivedData, host->receivedDataLength, host->sslPacketData[1], sizeof(host->sslPacketData[1]), ssl_peer->peer_key.aes_key, ssl_peer->peer_key.salt, CRYPTO_AES_KEY_LEN);
-		// int decryptedSize = ssl_decrypt_message(peer->peerSSLIndex, host->receivedData, host->receivedDataLength, host->sslPacketData[1], sizeof(host->sslPacketData[1]));
-		if (decryptedSize < 0)
+		peer = enet_get_peer_by_address(host, &host->receivedAddress);
+		if (peer && (peer->state == ENET_PEER_STATE_CONNECTED || peer->state == ENET_PEER_STATE_ACKNOWLEDGING_CONNECT))
 		{
-			return 0;
-		}
+			int decryptedSize = ssl_decrypt_message(0, host->receivedData, host->receivedDataLength, host->sslPacketData[1], sizeof(host->sslPacketData[1]), peer->ssl_peer.peer_key.aes_key, peer->ssl_peer.peer_key.salt, CRYPTO_AES_KEY_LEN);
+			if (decryptedSize < 0)
+			{
+				return 0;
+			}
 
-		memcpy(host->receivedData, host->sslPacketData[1], sizeof(host->sslPacketData[1]));
-		host->receivedDataLength = decryptedSize;
+			memcpy(host->receivedData, host->sslPacketData[1], sizeof(host->sslPacketData[1]));
+			host->receivedDataLength = decryptedSize;
+		}
 	}
-#endif
 
     if (host -> receivedDataLength < (size_t) & ((ENetProtocolHeader *) 0) -> sentTime)
       return 0;
@@ -1744,40 +1735,36 @@ enet_protocol_send_outgoing_commands (ENetHost * host, ENetEvent * event, int ch
             host -> bufferCount = 2;
         }
 
-#ifdef ENET_ENABLE_SSL
-		if (currentPeer->state == ENET_PEER_STATE_CONNECTED)
+		if(host -> enableSSL)
 		{
-			int offset = 0;
-			int i = 0;
-			for (i = 0; i < host->bufferCount; i++)
+			if (currentPeer->state == ENET_PEER_STATE_CONNECTED)
 			{
-				if (offset + host->buffers[i].dataLength > sizeof(host->sslPacketData[0]))
+				int offset = 0;
+				int i = 0;
+				for (i = 0; i < host->bufferCount; i++)
+				{
+					if (offset + host->buffers[i].dataLength > sizeof(host->sslPacketData[0]))
+					{
+						return -1;
+					}
+
+					memcpy(host->sslPacketData[0] + offset, host->buffers[i].data, host->buffers[i].dataLength);
+					offset += host->buffers[i].dataLength;
+				}
+
+				int encryptedSize = ssl_encrypt_message(0, host->sslPacketData[0], offset, host->sslPacketData[1], sizeof(host->sslPacketData[1]), currentPeer->ssl_peer.peer_key.aes_key, currentPeer->ssl_peer.peer_key.salt, CRYPTO_AES_KEY_LEN);
+
+				//int encryptedSize = ssl_encrypt_message(currentPeer->peerSSLIndex, host->sslPacketData[0], offset, host->sslPacketData[1], sizeof(host->sslPacketData[1]));
+				if (encryptedSize < 0)
 				{
 					return -1;
 				}
 
-				memcpy(host->sslPacketData[0] + offset, host->buffers[i].data, host->buffers[i].dataLength);
-				offset += host->buffers[i].dataLength;
+				host->buffers[0].data = host->sslPacketData[1];
+				host->buffers[0].dataLength = encryptedSize;
+				host->bufferCount = 1;
 			}
-
-			SSL_Peer* ssl_peer = get_peer(currentPeer->peerSSLIndex);
-			int encryptedSize = ssl_encrypt_message(currentPeer->peerSSLIndex, host->sslPacketData[0], offset, host->sslPacketData[1], sizeof(host->sslPacketData[1]), ssl_peer->peer_key.aes_key, ssl_peer->peer_key.salt, CRYPTO_AES_KEY_LEN);
-
-			printf("[outgoing] full size: %d, encryted size: %d\n", offset, encryptedSize);
-			printf("[outgoing] peerId: %d\n", host->sslPacketData[0][0]);
-
-			//int encryptedSize = ssl_encrypt_message(currentPeer->peerSSLIndex, host->sslPacketData[0], offset, host->sslPacketData[1], sizeof(host->sslPacketData[1]));
-			if (encryptedSize < 0)
-			{
-				return -1;
-			}
-
-			host->buffers[0].data = host->sslPacketData[1];
-			host->buffers[0].dataLength = encryptedSize;
-			host->bufferCount = 1;
 		}
-#endif
-
 
         currentPeer -> lastSendTime = host -> serviceTime;
 
@@ -1970,7 +1957,6 @@ enet_host_service (ENetHost * host, ENetEvent * event, enet_uint32 timeout)
     return 0; 
 }
 
-#ifdef ENET_ENABLE_SSL
 ENetPeer* enet_get_peer_by_address(ENetHost* host, ENetAddress* address)
 {
 	ENetPeer* currentPeer;
@@ -1987,4 +1973,8 @@ ENetPeer* enet_get_peer_by_address(ENetHost* host, ENetAddress* address)
 	return NULL;
 }
 
-#endif
+void enet_enable_ssl(ENetHost* host)
+{
+	host->enableSSL = TRUE;
+}
+

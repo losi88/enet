@@ -85,7 +85,7 @@ set(SOURCE_FILES
     protocol.c
     unix.c
     win32.c
-	ssl/ecdh.cpp
+	ssl/ecdh.c
 	ssl/ssl_enet.cpp
 	)
 

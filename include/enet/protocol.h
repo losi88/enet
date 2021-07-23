@@ -99,11 +99,9 @@ typedef struct _ENetProtocolConnect
    enet_uint32 packetThrottleDeceleration;
    enet_uint32 connectID;
    enet_uint32 data;
-#ifdef ENET_ENABLE_SSL
    enet_uint8  sslSessionID[32];
    enet_uint8  psk[CRYPTO_EC_PUB_KEY_LEN];
    enet_uint8  salt[CRYPTO_SALT_LEN];
-#endif
 } ENET_PACKED ENetProtocolConnect;
 
 typedef struct _ENetProtocolVerifyConnect
@@ -121,11 +119,9 @@ typedef struct _ENetProtocolVerifyConnect
    enet_uint32 packetThrottleAcceleration;
    enet_uint32 packetThrottleDeceleration;
    enet_uint32 connectID;
-#ifdef ENET_ENABLE_SSL
    enet_uint8  sslSessionID[32];
    enet_uint8  psk[CRYPTO_EC_PUB_KEY_LEN];
    enet_uint8  salt[CRYPTO_SALT_LEN];
-#endif
 } ENET_PACKED ENetProtocolVerifyConnect;
 
 typedef struct _ENetProtocolBandwidthLimit

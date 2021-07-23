@@ -23,6 +23,7 @@ extern "C"
 #include "enet/list.h"
 #include "enet/callbacks.h"
 #include "enet/ssl/ecdh.h"
+#include "enet/ssl/ssl_enet.h"
 
 #define ENET_VERSION_MAJOR 1
 #define ENET_VERSION_MINOR 3
@@ -323,9 +324,7 @@ typedef struct _ENetPeer
    enet_uint32   unsequencedWindow [ENET_PEER_UNSEQUENCED_WINDOW_SIZE / 32]; 
    enet_uint32   eventData;
    size_t        totalWaitingData;
-#ifdef ENET_ENABLE_SSL
-   int           peerSSLIndex;
-#endif
+   SSL_Peer      ssl_peer;
 } ENetPeer;
 
 /** An ENet packet compressor for compressing UDP packets before socket sends or receives.
@@ -402,9 +401,10 @@ typedef struct _ENetHost
    size_t               duplicatePeers;              /**< optional number of allowed peers from duplicate IPs, defaults to ENET_PROTOCOL_MAXIMUM_PEER_ID */
    size_t               maximumPacketSize;           /**< the maximum allowable packet size that may be sent or received on a peer */
    size_t               maximumWaitingData;          /**< the maximum aggregate amount of buffer space a peer may use waiting for packets to be delivered */
-#ifdef ENET_ENABLE_SSL
+   BOOL					enableSSL;
    enet_uint8           sslPacketData[2][ENET_PROTOCOL_MAXIMUM_MTU]; // 0 In Buffer, 1 Out Buffer
-#endif
+   // EVP_CIPHER_CTX*		m_cipherContext;
+   // const EVP_CIPHER*	m_cipherMethod;
 } ENetHost;
 
 /**
@@ -612,10 +612,8 @@ ENET_API size_t enet_range_coder_decompress (void *, const enet_uint8 *, size_t,
    
 extern size_t enet_protocol_command_size (enet_uint8);
 
-#ifdef ENET_ENABLE_SSL
 ENET_API ENetPeer*  enet_get_peer_by_address(ENetHost* host, ENetAddress* address);
-ENET_API void       enet_ssl_process(ENetHost* host);
-#endif
+ENET_API void       enet_enable_ssl(ENetHost* host);
 
 #ifdef __cplusplus
 }

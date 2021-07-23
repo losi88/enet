@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include <openssl/ssl.h>
 #include <openssl/rand.h>
@@ -11,11 +12,10 @@
 #include "openssl/hmac.h"
 #include "openssl/ec.h"
 #include "openssl/obj_mac.h"
-#include "enet/ssl/common.h"
 
 int encrypt_message(unsigned int peerIndex, const unsigned char* buffer,
-	unsigned int inSize, unsigned char* bufferOut, unsigned int outBufferSize,
-	const unsigned char *key, const unsigned char *iv)
+                    unsigned int inSize, unsigned char* bufferOut, unsigned int outBufferSize,
+                    const unsigned char *key, const unsigned char *iv)
 {
 	EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 	const EVP_CIPHER *cipherMethod = EVP_aes_256_cbc();
@@ -95,7 +95,7 @@ bool rand_salt(uint8_t salt[], int32_t bytes)
 bool generate_ecdh_keys(uint8_t ecdh_public_key[CRYPTO_EC_PUB_KEY_LEN],
 	uint8_t ecdh_private_key[CRYPTO_EC_PRIV_KEY_LEN], const char* file_prefix)
 {
-	int len = 0;
+	size_t len = 0;
 	bool ret = false;
 
 	EC_KEY *ecdh = EC_KEY_new();
@@ -152,7 +152,6 @@ bool generate_ecdh_keys(uint8_t ecdh_public_key[CRYPTO_EC_PUB_KEY_LEN],
 		//	PEM_read_ECPrivateKey(fp, &ecdh, NULL, NULL);
 		//	fclose(fp);
 		//}
-
 
 		point = EC_KEY_get0_public_key(ecdh);
 

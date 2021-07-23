@@ -1,31 +1,31 @@
-#include "enet/ssl/ssl_enet.h"
-
 #include <string>
 #include <vector>
 #include <openssl/evp.h>
 #include "openssl/ssl.h"
 #include "enet/ssl/common.h"
+#include "enet/protocol.h"
+#include "enet/ssl/ssl_enet.h"
+#include "enet/enet.h"
 
-uint8_t SSLWorkBuffer[4096];
-SSL_Peer*				m_peers[MAX_PEERS];
-EVP_CIPHER_CTX*			m_cipherContext;
-const EVP_CIPHER*       m_cipherMethod;
-unsigned int			m_ivLength;
+// static SSL_Peer* m_peers[ENET_PROTOCOL_MAXIMUM_PEER_ID];
+// static EVP_CIPHER_CTX* m_cipherContext;
+// static const EVP_CIPHER* m_cipherMethod;
+// static unsigned int m_ivLength;
+// uint8_t SSLWorkBuffer[4096];
 
 using namespace std;
 
-bool ssl_init()
+bool ssl_init(struct _ENetHost* host)
 {
-	memset(m_peers, 0, sizeof(m_peers));
-	
 	OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT, NULL);
 
-	m_cipherContext = EVP_CIPHER_CTX_new();
-	EVP_CIPHER_CTX_set_padding(m_cipherContext, 0);
-	if (!m_cipherContext)
-	{
-		return false;
-	}
+	// host -> m_cipherContext = EVP_CIPHER_CTX_new();
+	// EVP_CIPHER_CTX_set_padding(host->m_cipherContext, 0);
+	// host->m_cipherMethod = EVP_aes_256_cbc();
+	// if (!host->m_cipherContext)
+	// {
+	// 	return false;
+	// }
 
 	return true;
 }
@@ -56,49 +56,32 @@ void ssl_get_session_id(unsigned int peer, unsigned char* sessionId, unsigned in
 	return true;
 }
 
-void ssl_shut_down_peer(int index)
+// void ssl_shut_down_peer(int index)
+// {
+// 	SSL_Peer* peer = get_peer(index);
+// 	if (!peer)
+// 	{
+// 		return;
+// 	}
+//
+// 	// LogMsg("Shutdown Peer %d", index);
+// 	delete peer;
+// 	m_peers[index] = nullptr;
+// }
+
+bool ssl_create_peer(struct _ENetPeer* peer, const ownkey_s* own_key, const peerkey_s* peer_key)
 {
-	SSL_Peer* peer = get_peer(index);
-	if (!peer)
-	{
-		return;
-	}
+	peer->ssl_peer.state = SSL_Peer_State_HandshakeComplete;
 
-	// LogMsg("Shutdown Peer %d", index);
-	delete peer;
-	m_peers[index] = nullptr;
-}
-
-int ssl_create_peer(const ownkey_s* own_key, const peerkey_s* peer_key)
-{
-	int index = get_new_peer();
-	if (index < 0)
-	{
-		// LogMsg("Not Enough Space for new Peers");
-		return -1;
-	}
-	else
-	{
-		// LogMsg("Create Peer %d", index);
-	}
-
-	SSL_Peer* peer = new SSL_Peer;
-
-	peer->state = SSL_Peer_State_HandshakeComplete;
-
-	memcpy(peer->ownkey.ec_priv_key, own_key->ec_priv_key, CRYPTO_EC_PRIV_KEY_LEN);
-	memcpy(peer->ownkey.ec_pub_key, own_key->ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(peer->ownkey.salt, own_key->salt, CRYPTO_SALT_LEN);
+	memcpy(peer->ssl_peer.ownkey.ec_priv_key, own_key->ec_priv_key, CRYPTO_EC_PRIV_KEY_LEN);
+	memcpy(peer->ssl_peer.ownkey.ec_pub_key, own_key->ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
+	memcpy(peer->ssl_peer.ownkey.salt, own_key->salt, CRYPTO_SALT_LEN);
 	
-	memcpy(peer->peer_key.aes_key, peer_key->aes_key, CRYPTO_EC_PRIV_KEY_LEN);
-	memcpy(peer->peer_key.ec_pub_key, peer_key->ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(peer->peer_key.salt, peer_key->salt, CRYPTO_SALT_LEN);
-	
-	m_peers[index] = peer;
-	m_cipherMethod = EVP_aes_256_cbc();
-	
-	set_iv_length(EVP_CIPHER_iv_length(m_cipherMethod));
-	return index;
+	memcpy(peer->ssl_peer.peer_key.aes_key, peer_key->aes_key, CRYPTO_EC_PRIV_KEY_LEN);
+	memcpy(peer->ssl_peer.peer_key.ec_pub_key, peer_key->ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
+	memcpy(peer->ssl_peer.peer_key.salt, peer_key->salt, CRYPTO_SALT_LEN);
+
+	return true;
 }
 
 
@@ -106,35 +89,47 @@ int ssl_encrypt_message(unsigned int peer, const unsigned char* buffer, unsigned
 	const unsigned char *key, const unsigned char *iv, uint8_t key_len)
 {
 	unsigned int hmacLength = 0;
+	uint8_t SSLWorkBuffer[ENET_PROTOCOL_MAXIMUM_MTU] = {0, };
 	memcpy(SSLWorkBuffer, buffer, inSize);
-	//if (CalculateHMAC(peer, buffer, inSize, SSLWorkBuffer + inSize, hmacLength, key, key_len) > 0)
-	//{
-	//	int encryptedSize = EncryptMessage(peer, SSLWorkBuffer, inSize + 32, bufferOut, outBufferSize,
-	//		key, iv);
-	//	if (encryptedSize > 0)
-	//	{
-	//		return encryptedSize;
-	//	}
-	//}
-	// int encryptedSize = encrypt_message(peer, SSLWorkBuffer, inSize + 32, bufferOut, outBufferSize, key, iv);
-	common::hex_dump(key, CRYPTO_AES_KEY_LEN, std::cout);
-	common::hex_dump(iv, CRYPTO_SALT_LEN, std::cout);
-	int encryptedSize = encrypt_message(peer, SSLWorkBuffer, inSize, bufferOut, outBufferSize, key, iv);
-	return encryptedSize;
+	if (calculate_hmac(peer, buffer, inSize, SSLWorkBuffer + inSize, &hmacLength, key, key_len) > 0)
+	{
+		int encryptedSize = encrypt_message(peer, SSLWorkBuffer, inSize + CRYPTO_HMAC_SHA256, bufferOut, outBufferSize,
+			key, iv);
+		if (encryptedSize > 0)
+		{
+			return encryptedSize;
+		}
+	}
+
+	return -1;
 }
 
 int ssl_decrypt_message(unsigned int peer, const unsigned char* buffer, unsigned int inSize, unsigned char* bufferOut, unsigned int outBufferSize,
 	const unsigned char *key, const unsigned char *iv, uint8_t key_len)
 {
 	unsigned int hmacLength = 0;
-	// std::string calculatedHmac;
-	// calculatedHmac.resize(32);
-
-	common::hex_dump(key, CRYPTO_AES_KEY_LEN, std::cout);
-	common::hex_dump(iv, CRYPTO_SALT_LEN, std::cout);
+	if (inSize < CRYPTO_HMAC_SHA256)
+	{
+		return -1;
+	}
+	
+	unsigned char calculatedHmac[CRYPTO_HMAC_SHA256] = { 0, };
+	
 	int decryptedSize = decrypt_message(peer, buffer, inSize, bufferOut, outBufferSize, key, iv);
+	if (decryptedSize > 0)
+	{
+		unsigned char receivedHmac[CRYPTO_HMAC_SHA256] { 0, };
+		memcpy(receivedHmac, bufferOut + (decryptedSize - CRYPTO_HMAC_SHA256), CRYPTO_HMAC_SHA256);
+		if (calculate_hmac(peer, bufferOut, decryptedSize - CRYPTO_HMAC_SHA256, calculatedHmac, &hmacLength, key, key_len) > 0)
+		{
+			if (0 == memcmp(calculatedHmac, receivedHmac, CRYPTO_HMAC_SHA256))
+			{
+				return decryptedSize - CRYPTO_HMAC_SHA256;
+			}
+		}
+	}
 
-	return decryptedSize;
+	return -1;
 }
 
  bool ssl_key_calculate(const ownkey_s* ownkey, peerkey_s* peerkey)
@@ -147,7 +142,10 @@ int ssl_decrypt_message(unsigned int peer, const unsigned char* buffer, unsigned
 		return false;
 	}
 
+	std::cout << "Calculated the final salt:" << std::endl;
+
 	memcpy(peerkey->salt, salt_xor, CRYPTO_SALT_LEN);
+	common::hex_dump(peerkey->salt, CRYPTO_SALT_LEN, std::cout);
 	
 	/* Calculate the shared key using own public and private keys and the public key of the other party */
 	uint8_t shared_key[CRYPTO_ECDH_SHARED_KEY_LEN];

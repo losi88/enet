@@ -5,9 +5,6 @@
 #define ENET_BUILDING_LIB 1
 #include <string.h>
 #include "enet/enet.h"
-#ifdef ENET_ENABLE_SSL
-#include "enet/ssl/ssl_enet.h"
-#endif
 
 /** @defgroup host ENet host functions
     @{
@@ -115,9 +112,9 @@ enet_host_create (const ENetAddress * address, size_t peerCount, size_t channelL
 
     enet_list_clear (& host -> dispatchQueue);
 
-#ifdef ENET_ENABLE_SSL
-	ssl_init();
-#endif
+	host -> enableSSL = FALSE;
+	if (!ssl_init(host))
+		return NULL;
 
     for (currentPeer = host -> peers;
          currentPeer < & host -> peers [host -> peerCount];
@@ -127,9 +124,6 @@ enet_host_create (const ENetAddress * address, size_t peerCount, size_t channelL
        currentPeer -> incomingPeerID = currentPeer - host -> peers;
        currentPeer -> outgoingSessionID = currentPeer -> incomingSessionID = 0xFF;
        currentPeer -> data = NULL;
-#ifdef ENET_ENABLE_SSL
-	   currentPeer->peerSSLIndex = -1;
-#endif
 
        enet_list_clear (& currentPeer -> acknowledgements);
        enet_list_clear (& currentPeer -> sentReliableCommands);
@@ -266,27 +260,24 @@ enet_host_connect (ENetHost * host, const ENetAddress * address, size_t channelC
     command.connect.connectID = currentPeer -> connectID;
     command.connect.data = ENET_HOST_TO_NET_32 (data);
 
-#ifdef ENET_ENABLE_SSL
-	ssl_get_session_id(0, (unsigned char*)command.connect.sslSessionID, sizeof(command.connect.sslSessionID));
-	ownkey_s client_key;
-	if(!ssl_get_keymaterial_for_session_id((unsigned char*)command.connect.sslSessionID, &client_key))
+	if(host -> enableSSL)
 	{
-		return NULL;
-	}
+		ssl_get_session_id(0, (unsigned char*)command.connect.sslSessionID, sizeof(command.connect.sslSessionID));
+		ownkey_s client_key;
+		if(!ssl_get_keymaterial_for_session_id((unsigned char*)command.connect.sslSessionID, &client_key))
+		{
+			return NULL;
+		}
 
-	peerkey_s peer_key;
-	memset(peer_key.aes_key, 0, CRYPTO_AES_KEY_LEN);
-	memset(peer_key.ec_pub_key, 0, CRYPTO_EC_PUB_KEY_LEN);
-	memset(peer_key.salt, 0, CRYPTO_SALT_LEN);
+		peerkey_s peer_key;
+		memset(peer_key.aes_key, 0, CRYPTO_AES_KEY_LEN);
+		memset(peer_key.ec_pub_key, 0, CRYPTO_EC_PUB_KEY_LEN);
+		memset(peer_key.salt, 0, CRYPTO_SALT_LEN);
 
-	currentPeer->peerSSLIndex = ssl_create_peer(&client_key, &peer_key);
-	if (currentPeer->peerSSLIndex < 0)
-	{
-		return NULL;
+		ssl_create_peer(currentPeer, &client_key, &peer_key);
+		memcpy(command.connect.psk, client_key.ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
+		memcpy(command.connect.salt, client_key.salt, CRYPTO_SALT_LEN);
 	}
-	memcpy(command.connect.psk, client_key.ec_pub_key, CRYPTO_EC_PUB_KEY_LEN);
-	memcpy(command.connect.salt, client_key.salt, CRYPTO_SALT_LEN);
-#endif
 
     enet_peer_queue_outgoing_command (currentPeer, & command, NULL, 0, 0);
 

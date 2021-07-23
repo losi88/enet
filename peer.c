@@ -5,7 +5,6 @@
 #include <string.h>
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
-#include "enet/ssl/ssl_enet.h"
 
 /** @defgroup peer ENet peer functions 
     @{
@@ -423,10 +422,6 @@ enet_peer_reset (ENetPeer * peer)
     peer -> eventData = 0;
     peer -> totalWaitingData = 0;
     peer -> flags = 0;
-#ifdef ENET_ENABLE_SSL
-	ssl_shut_down_peer(peer->peerSSLIndex);
-	peer->peerSSLIndex = -1;
-#endif
 
     memset (peer -> unsequencedWindow, 0, sizeof (peer -> unsequencedWindow));
     
